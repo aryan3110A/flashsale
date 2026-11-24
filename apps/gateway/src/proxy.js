@@ -9,14 +9,16 @@ const HOP_BY_HOP = new Set([
 // Never forwarded to upstream services.
 // `expect` (100-continue, sent by Windows PowerShell 5.1 and curl for large bodies) is answered by the gateway's own
 // HTTP server; forwarding it makes undici reject the request (UND_ERR_NOT_SUPPORTED -> 502).
-const REQUEST_STRIP = new Set(['cookie', 'authorization', 'expect']);
+const REQUEST_STRIP = new Set(['cookie', 'expect']);
 // Never copied from upstream back to the client (the gateway owns CORS and does not leak internals).
 const RESPONSE_STRIP = new Set(['server', 'x-powered-by', 'content-encoding', 'access-control-allow-origin', 'access-control-allow-credentials']);
 
-export function buildForwardHeaders(req) {
+export function buildForwardHeaders(req, { forwardAuthorization = false } = {}) {
   const headers = {};
   for (const [k, v] of Object.entries(req.headers)) {
     if (HOP_BY_HOP.has(k) || REQUEST_STRIP.has(k)) continue;
+    // Credentials are only passed to the service that owns authentication (booking-api), never to others.
+    if (k === 'authorization' && !forwardAuthorization) continue;
     headers[k] = Array.isArray(v) ? v.join(', ') : v;
   }
   const prior = req.headers['x-forwarded-for'];
@@ -36,12 +38,12 @@ function isTimeout(err) {
  * Responsibilities: header hygiene, request-id propagation, per-attempt timeout, safe retries,
  * optional circuit breaker, consistent error JSON, and status/body propagation.
  */
-export function createProxy({ upstream, baseUrl, timeoutMs, retry, breaker, metrics, logger, errorBody, fetchFn = fetch }) {
+export function createProxy({ upstream, baseUrl, timeoutMs, retry, breaker, metrics, logger, errorBody, fetchFn = fetch, forwardAuthorization = false }) {
   return async function proxy(req, res) {
     const url = new URL(req.originalUrl, baseUrl);
     const method = req.method;
     const body = Buffer.isBuffer(req.body) && req.body.length > 0 ? req.body : undefined;
-    const headers = buildForwardHeaders(req);
+    const headers = buildForwardHeaders(req, { forwardAuthorization });
     const hasIdempotencyKey = Boolean(req.headers['idempotency-key']);
 
     const attemptFn = () => fetchFn(url, {

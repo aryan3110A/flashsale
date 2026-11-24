@@ -55,7 +55,16 @@ READ COMMITTED. The conditional `UPDATE` locks the row and re-checks its predica
 Per-event row contention (one hot row); single PostgreSQL and Redis instances; gateway breaker state is per instance; in the load test with one shared IP the limiter, not the backend, bounds throughput. Mitigations: sharded inventory counters or pre-allocated ticket blocks, read replicas, Redis Sentinel/Cluster, shared breaker state.
 
 **19. Security measures? Known weaknesses?**
-Env-based secrets, body size limits, CORS allow-list, Helmet headers, parameterised SQL, strict validation, internal-only network, log redaction. Weaknesses: no authentication ("My bookings" is by e-mail), demo endpoints enabled by default in compose, single-node infra.
+Env-based secrets, body size limits, CORS allow-list, Helmet headers, parameterised SQL, strict validation, internal-only network, log redaction. Accounts: scrypt-hashed passwords, SHA-256-hashed revocable session tokens, identical error for unknown e-mail and wrong password, stricter rate limit on login/sign-up. Weaknesses: e-mails are not verified, no password reset, the token sits in localStorage, guests can still look up bookings by e-mail, demo endpoints enabled by default in compose, single-node infra.
 
 **20. What would you do next?**
-Authentication/authorisation, payments via a real provider with its own idempotency, OpenTelemetry tracing, HA data stores, shared circuit-breaker state, cancellation/refund flow, per-event inventory sharding for extreme hot spots.
+E-mail verification + password reset + roles, httpOnly-cookie sessions, payments via a real provider with its own idempotency, OpenTelemetry tracing, HA data stores, shared circuit-breaker state, cancellation/refund flow, per-event inventory sharding for extreme hot spots.
+
+**21. How would you show that many simultaneous bookings are handled?**
+The `/simulator` page: 10 virtual users each try to buy 10 tickets (and click 8 times) for 50 tickets. Live charts show accepted (202), duplicate clicks absorbed by idempotency (200), sold out (409), rate limited (429) and errors, then the pipeline (processing to confirmed) and the stock. Exactly 5 users win, nothing is oversold, each winner has one booking, and the panel below shows every service healthy.
+
+**22. How do you store passwords and sessions?**
+Passwords with scrypt (memory-hard, random salt per password); sessions as random tokens of which only the SHA-256 is stored, so a leaked database gives no usable session, and logout deletes the row so it takes effect at once. Login returns the same error for an unknown e-mail and a wrong password and does a dummy hash, so neither the message nor the timing reveals which e-mails exist.
+
+**23. How do you stop password guessing?**
+The gateway puts login and sign-up behind a separate, smaller Token Bucket (burst 10, then 1 per 2 s per client), on top of the normal limit. Tested: 14 rapid wrong guesses get 401s then 429 with Retry-After, while a different client can still log in.

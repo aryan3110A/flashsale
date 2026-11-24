@@ -1,4 +1,5 @@
-import type { Booking, BookingAccepted, CategoryItem, EventItem, WorkerEvent } from './types';
+import type { AuthResult, AuthUser, Booking, BookingAccepted, CategoryItem, EventItem, FlashSaleState, WorkerEvent } from './types';
+import { getToken } from './auth-token';
 
 export const GATEWAY_URL = (process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:8080').replace(/\/$/, '');
 
@@ -39,17 +40,19 @@ const numHeader = (h: Headers, k: string) => { const v = h.get(k); return v === 
 /** Low level call. Never throws on HTTP status (callers like the playground want to *see* 429/503). Throws ApiError only for network failure. */
 export async function rawRequest<T = unknown>(
   path: string,
-  opts: { method?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number; signal?: AbortSignal } = {},
+  opts: { method?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number; signal?: AbortSignal; anonymous?: boolean } = {},
 ): Promise<RawResponse<T>> {
   const requestId = newId();
   const started = performance.now();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 15_000);
+  // `anonymous` calls (the load simulator) must never carry the logged-in user's identity.
+  const token = opts.anonymous ? null : getToken();
   opts.signal?.addEventListener('abort', () => ctrl.abort());
   try {
     const res = await fetch(`${GATEWAY_URL}${path}`, {
       method: opts.method ?? 'GET',
-      headers: { 'X-Request-Id': requestId, ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...opts.headers },
+      headers: { 'X-Request-Id': requestId, ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...opts.headers },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: ctrl.signal,
       cache: 'no-store',
@@ -118,5 +121,12 @@ export const api = {
   bookingsByEmail: (email: string) => request<Booking[]>(`/api/bookings?email=${encodeURIComponent(email)}`),
   workerEvents: (bookingId: string) => request<WorkerEvent[]>(`/api/worker/events?bookingId=${bookingId}`),
   demoEvent: () => request<{ eventId: string; availableCapacity: number; chaosEnabled: boolean }>('/api/demo/event'),
+  signup: (input: { name: string; email: string; password: string }) => request<AuthResult>('/api/auth/signup', { method: 'POST', body: input, anonymous: true }),
+  login: (input: { email: string; password: string }) => request<AuthResult>('/api/auth/login', { method: 'POST', body: input, anonymous: true }),
+  me: () => request<{ user: AuthUser }>('/api/auth/me'),
+  logout: () => request<{ loggedOut: boolean }>('/api/auth/logout', { method: 'POST' }),
+  myBookings: () => request<Booking[]>('/api/bookings/mine'),
+  flashSale: () => request<FlashSaleState>('/api/demo/flash-sale', { timeoutMs: 5000 }),
+  flashSaleReset: (capacity: number) => request<FlashSaleState>('/api/demo/flash-sale/reset', { method: 'POST', body: { capacity } }),
   cacheClear: () => request<{ removedKeys: number }>('/api/cache/clear', { method: 'POST' }),
 };

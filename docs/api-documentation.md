@@ -95,3 +95,28 @@ Responses include `X-Circuit-State` (`CLOSED|HALF_OPEN|OPEN`) and, when retried,
 ## Test-only admin (disabled unless `ENABLE_TEST_ENDPOINTS=true` **and** `ADMIN_TOKEN` set; send `X-Admin-Token`)
 
 `GET /api/admin/test-event` (inventory + consistency check) · `POST /api/admin/test-event/reset` `{capacity}`. They touch only the hidden `load-test-event`. Only the test overlay turns them on.
+
+## Accounts
+
+Send the token as `Authorization: Bearer <token>`. The gateway forwards this header **only** to the Booking API (never to the mock service) and still drops cookies. Responses from these endpoints carry `Cache-Control: no-store`. `POST /api/auth/login` and `POST /api/auth/signup` additionally pass through a stricter rate-limit bucket (default: burst 10, then 1 per 2 s per client) before the normal API bucket.
+
+| Endpoint | Body / headers | Result |
+|---|---|---|
+| `POST /api/auth/signup` | `{name, email, password}` (password 8-128 chars, at least a letter and a digit; unknown keys rejected) | **201** `{data:{user:{id,name,email}, token, expiresAt}}` · 409 `EMAIL_TAKEN` · 400 `VALIDATION_ERROR` |
+| `POST /api/auth/login` | `{email, password}` | **200** same shape · 401 `INVALID_CREDENTIALS` (identical message for unknown e-mail and wrong password) |
+| `GET /api/auth/me` | Bearer | 200 `{data:{user}}` · 401 `AUTH_REQUIRED` (no token) / `INVALID_TOKEN` (unknown, expired or logged-out token) |
+| `POST /api/auth/logout` | Bearer | 200; the session row is deleted, so the token stops working immediately |
+| `GET /api/bookings/mine` | Bearer | the account's bookings (same shape as `GET /api/bookings?email=`) |
+
+Behaviour of `POST /api/bookings` with a token: the **name and e-mail come from the account**, whatever the body says, so a logged-in user cannot book as someone else; an invalid/expired token is a **401** (it is never silently treated as a guest). Without a token the booking works as before (guest).
+
+If a guest e-mail already exists (from earlier bookings), signing up with it **claims** that row: the password is set and the booking history becomes visible to the new account. E-mails are not verified in this demo.
+
+## Flash-sale simulator helpers (`ENABLE_DEMO_ENDPOINTS=true`, default in compose)
+
+They operate only on the hidden event `flash-sale-demo` (default capacity 50), which never appears in public listings.
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/demo/flash-sale` | `{eventId, title, totalCapacity, availableCapacity, status, bookings, confirmed, processing, failed, reservedTickets, consistent, list:[{reference,status,quantity,customerName,createdAt}]}`. `consistent` = `total - available == tickets held by live bookings` and `available >= 0`. |
+| `POST /api/demo/flash-sale/reset` `{capacity?}` (1-1000, default 50) | Deletes **that event's** bookings and outbox rows, restores stock and status `ON_SALE`. Returns the new state. 400 on an invalid capacity. |

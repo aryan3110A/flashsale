@@ -75,7 +75,7 @@ Next.js (JSX, rewrites) → Express gateway (single file) → Booking API (singl
 | Containers non-root | PASS | `USER node` |
 | Rate limiting | PASS | per-IP; NAT limitation documented |
 | Test/demo endpoints | PARTIAL | admin endpoints off unless test overlay + token; **demo endpoints (cache clear, chaos headers) are ON in compose by default** for the demo; set `ENABLE_DEMO_ENDPOINTS=false` / `ENABLE_CHAOS=false` for anything public |
-| Authentication / authorisation | NOT IMPLEMENTED | out of scope; bookings are looked up by e-mail (masked). Anyone knowing an e-mail can list its bookings |
+| Authentication | PARTIAL | **added after the first audit**: sign-up / login / logout, scrypt hashes, hashed revocable sessions, generic login errors, stricter login rate limit, logged-in users book as themselves. **Still missing:** e-mail verification (first sign-up claims a guest e-mail's history), password reset, roles/admin, httpOnly cookies (token is in localStorage). Guests can still list bookings by e-mail (masked) |
 | TLS | NOT IMPLEMENTED | plain HTTP on localhost |
 | Dependency audit | PASS (prod) / PARTIAL (dev) | prod 0 vulnerabilities; dev vitest chain advisories remain |
 
@@ -99,7 +99,7 @@ Next.js (JSX, rewrites) → Express gateway (single file) → Booking API (singl
 3. Circuit-breaker state is per gateway process.
 4. Limiter fails open when Redis is down (deliberate, configurable).
 5. A SIGKILLed worker's jobs wait for BullMQ's ~30 s stall detection.
-6. No authentication; demo endpoints on by default in compose.
+6. Authentication is basic (no e-mail verification, no password reset, no roles); the guest e-mail lookup still exists; demo endpoints (cache clear, failure injection, flash-sale reset) are on by default in compose.
 7. Event photos come from Unsplash at runtime.
 8. Cache gave no measurable latency gain at this data size (measured; see load report).
 9. Multi-container gateway limiter behaviour, non-Chromium browsers, automated accessibility audit: NOT TESTED.

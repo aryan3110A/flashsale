@@ -31,6 +31,8 @@ const EVENTS = [
   // Dedicated, hidden events for demos and automated tests (never shown in public listings).
   { slug: 'demo-playground-event', title: 'Playground Demo Event', category: 'Demo', venue: 'Virtual', city: 'Online', days: 30, hour: 12, price: 100, capacity: 1_000_000, featured: false, test: true, image: null,
     description: 'Hidden event used by the in-app playground to exercise the booking pipeline.' },
+  { slug: 'flash-sale-demo', title: 'Flash Sale Demo Drop', category: 'Demo', venue: 'Virtual', city: 'Online', days: 30, hour: 12, price: 499, capacity: 50, featured: false, test: true, image: null,
+    description: 'Hidden event used by the live Flash Sale simulator. Its stock can be reset from the simulator page.' },
   { slug: 'load-test-event', title: 'Load Test Event', category: 'Demo', venue: 'Virtual', city: 'Online', days: 30, hour: 12, price: 100, capacity: 10, featured: false, test: true, image: null,
     description: 'Hidden event reset by automated concurrency and load tests.' },
 ];

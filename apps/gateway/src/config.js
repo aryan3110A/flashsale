@@ -24,6 +24,13 @@ export function loadConfig() {
         refillRate: num('RATE_LIMIT_HEALTH_REFILL_RATE', 150),
         refillIntervalMs: num('RATE_LIMIT_HEALTH_REFILL_INTERVAL', 1000),
       },
+      // Login / sign-up are the targets of password guessing, so they get a much smaller bucket
+      // (default: burst of 10, then one attempt every 2 s per client) on top of the general limit.
+      auth: {
+        capacity: num('RATE_LIMIT_AUTH_CAPACITY', 10),
+        refillRate: num('RATE_LIMIT_AUTH_REFILL_RATE', 1),
+        refillIntervalMs: num('RATE_LIMIT_AUTH_REFILL_INTERVAL', 2000),
+      },
       // DEMO/TEST ONLY: lets a client choose its own bucket via X-Client-Id so load tests can
       // simulate many distinct users from one machine. Must stay false in any real deployment.
       trustClientId: bool('RATE_LIMIT_TRUST_CLIENT_ID', false),

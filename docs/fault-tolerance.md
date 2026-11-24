@@ -64,3 +64,7 @@ Mock service: `/mock/normal`, `/mock/slow`, `/mock/fail`, `/mock/flaky`, `/mock/
 | Data across restart of every container | Persisted | ✔ confirmed booking and inventory unchanged |
 
 Known gaps: single instance of each service (no HA PostgreSQL/Redis); the breaker's state is not shared between multiple gateway instances; Redis-down means no rate limiting (fail-open by choice).
+
+## DNS isolation between dependencies
+
+Docker's embedded DNS answers NXDOMAIN for a stopped container slowly (measured 2.7-3.5 s) and serialises lookups, so without care a dead dependency delays connections to healthy ones (the gateway's connect timeout includes DNS time). The gateway therefore caches upstream DNS answers with stale-while-revalidate (2 s TTL): a recently resolved host needs no resolver round trip, an expired entry is used immediately while one background lookup refreshes it, and a failed refresh keeps the last address so a dead service fails fast on the TCP timeout. Verified: with the Booking API stopped, the first request to the mock service dropped from ~2.8 s to ~30 ms and the full fault suite passes (12/12).

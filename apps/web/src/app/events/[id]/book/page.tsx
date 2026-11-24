@@ -7,6 +7,7 @@ import { api, ApiError, newId } from '@/lib/api';
 import { useAsync } from '@/lib/hooks';
 import { getContact, saveContact } from '@/lib/storage';
 import { useToast } from '@/components/Toast';
+import { useAuth } from '@/components/AuthProvider';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ErrorState, Skeleton, StatusPill } from '@/components/ui';
 import { EMAIL_RE, clamp, fmtDateTime, money } from '@/lib/format';
@@ -19,6 +20,7 @@ export default function BookPage({ params }: { params: Promise<{ id: string }> }
 
 function BookFlow({ id }: { id: string }) {
   const toast = useToast();
+  const { user } = useAuth();
   const sp = useSearchParams();
   const { data, error, loading, reload } = useAsync(() => api.event(id), [id]);
   const [qty, setQty] = useState(clamp(Number(sp.get('qty')) || 1, 1, 10));
@@ -38,10 +40,13 @@ function BookFlow({ id }: { id: string }) {
   if (error) return <ErrorState error={error} onRetry={reload} />;
   if (loading && !data) return <Skeleton className="h-96" />;
   const ev = data!.data;
+  // A logged-in user always books as their account (the server enforces this too).
+  const cName = user ? user.name : name;
+  const cEmail = user ? user.email : email;
   const max = Math.min(10, ev.availableCapacity);
   const errors = {
-    name: name.trim().length < 2 ? 'Enter your full name (at least 2 characters).' : '',
-    email: !EMAIL_RE.test(email.trim()) ? 'Enter a valid email address.' : '',
+    name: cName.trim().length < 2 ? 'Enter your full name (at least 2 characters).' : '',
+    email: !EMAIL_RE.test(cEmail.trim()) ? 'Enter a valid email address.' : '',
     qty: qty < 1 || qty > max ? `Choose between 1 and ${max} tickets.` : '',
   };
   const valid = !errors.name && !errors.email && !errors.qty;
@@ -51,7 +56,7 @@ function BookFlow({ id }: { id: string }) {
     if (submitting) return; // guard against double submit
     setSubmitting(true);
     setFailure(null);
-    const payload = { eventId: ev.id, quantity: qty, name: name.trim(), email: email.trim().toLowerCase() };
+    const payload = { eventId: ev.id, quantity: qty, name: cName.trim(), email: cEmail.trim().toLowerCase() };
     const sig = JSON.stringify(payload);
     if (keyRef.current?.payload !== sig) keyRef.current = { payload: sig, key: `web-${newId()}` };
     try {
@@ -88,14 +93,19 @@ function BookFlow({ id }: { id: string }) {
                 {failure.requestId && <p className="num mt-2 text-xs text-muted">Request ID: {failure.requestId}</p>}
               </div>
             )}
+            {user ? (
+              <p className="rounded-xl border border-accent/30 bg-accent/10 p-3 text-sm" data-testid="booking-as">Booking as <strong>{user.name}</strong> ({user.email}). Your tickets will appear under <Link href="/bookings" className="underline">My bookings</Link>.</p>
+            ) : (
+              <p className="rounded-xl border border-line bg-white/5 p-3 text-sm text-muted">Booking as a guest. <Link href={`/login?next=${encodeURIComponent(`/events/${id}/book`)}`} className="font-semibold text-accent hover:underline">Log in</Link> or <Link href={`/signup?next=${encodeURIComponent(`/events/${id}/book`)}`} className="font-semibold text-accent hover:underline">sign up</Link> to book faster.</p>
+            )}
             <div>
               <label htmlFor="name" className="label">Full name</label>
-              <input id="name" className="input" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={touched && !!errors.name} aria-describedby="name-err" maxLength={100} />
+              <input id="name" className="input" autoComplete="name" value={cName} readOnly={!!user} onChange={(e) => setName(e.target.value)} aria-invalid={touched && !!errors.name} aria-describedby="name-err" maxLength={100} />
               <p id="name-err" className="mt-1 min-h-4 text-xs text-bad">{touched ? errors.name : ''}</p>
             </div>
             <div>
               <label htmlFor="email" className="label">Email (your bookings are looked up by this)</label>
-              <input id="email" type="email" className="input" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={touched && !!errors.email} aria-describedby="email-err" maxLength={200} />
+              <input id="email" type="email" className="input" autoComplete="email" value={cEmail} readOnly={!!user} onChange={(e) => setEmail(e.target.value)} aria-invalid={touched && !!errors.email} aria-describedby="email-err" maxLength={200} />
               <p id="email-err" className="mt-1 min-h-4 text-xs text-bad">{touched ? errors.email : ''}</p>
             </div>
             <div>

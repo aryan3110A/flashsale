@@ -100,3 +100,13 @@ export interface ServicesHealth {
   details: Record<string, { status: ServiceStatus; latencyMs?: number; message?: string; instances?: number }>;
   circuitBreaker: string;
 }
+
+export interface AuthUser { id: string; name: string; email: string }
+export interface AuthResult { user: AuthUser; token: string; expiresAt: string }
+
+export interface FlashSaleBooking { reference: string; status: BookingStatus; quantity: number; failureReason?: string; customerName: string; createdAt: string }
+export interface FlashSaleState {
+  eventId: string; title: string; totalCapacity: number; availableCapacity: number; status: string;
+  bookings: number; confirmed: number; processing: number; failed: number; reservedTickets: number; consistent: boolean;
+  list: FlashSaleBooking[];
+}

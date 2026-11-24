@@ -27,10 +27,11 @@ Not used: `setTimeout` timers or in-process counters (they are per-process, lost
 | `RATE_LIMIT_REFILL_RATE` | 20 | tokens added per interval |
 | `RATE_LIMIT_REFILL_INTERVAL` | 1000 | interval in ms |
 | `RATE_LIMIT_HEALTH_CAPACITY / _REFILL_RATE / _REFILL_INTERVAL` | 300 / 150 / 1000 | separate bucket for `/health*`, `/metrics*`, `/gateway/*` so monitoring and Docker health checks are never starved by user traffic |
+| `RATE_LIMIT_AUTH_CAPACITY / _REFILL_RATE / _REFILL_INTERVAL` | 10 / 1 / 2000 | extra, much smaller bucket for `POST /api/auth/login` and `/api/auth/signup` (password-guessing protection): a burst of 10 attempts, then one every 2 s per client. The request also counts against the normal API bucket. |
 | `RATE_LIMIT_FAIL_OPEN` | true | behaviour when Redis is unreachable |
 | `RATE_LIMIT_TRUST_CLIENT_ID` | **false** | demo/test only: honour `X-Client-Id` as the bucket key. Enabled only by `docker-compose.test.yml` so load tests can simulate many users from one machine. Never enable in a real deployment: clients could pick fresh buckets at will. |
 
-Bucket key: `flashsale:rl:{api|monitoring}:ip:{client ip}` (set `TRUST_PROXY=true` only behind a trusted proxy).
+Bucket key: `flashsale:rl:{api|monitoring|auth}:ip:{client ip}` (set `TRUST_PROXY=true` only behind a trusted proxy).
 
 ## Response
 

@@ -20,3 +20,12 @@ Tip: do the rate-limiter burst *before* long browsing, then wait 3 s, because th
 **Backup plan if something breaks live:** `docker compose ps` / `docker compose logs <svc> --tail 30`; the playground is independent of bookings; screenshots of the dashboard are in the report.
 
 **Optional kill-switch moment (30 s):** `docker compose stop worker`, book a ticket (stays PROCESSING; dashboard "Queue waiting" rises, worker tile turns unhealthy after ~15 s), `docker compose start worker` (booking completes).
+
+## Added: live "many people at once" demo (about 2 minutes)
+
+1. Open **/simulator**. Leave the defaults: 10 users x 10 tickets, 8 clicks each, 50 tickets, "Polite" clients. Say: "100 tickets are wanted, 50 exist, and every person clicks 8 times."
+2. Press **Start flash sale**. Point at the charts filling: green = accepted, blue = duplicate clicks absorbed by the idempotency key, orange = sold out, violet = rate limited by the gateway.
+3. Point at the pipeline chart: bookings go PROCESSING then CONFIRMED as the worker drains the queue, and at the stock chart which stops at 0, never below.
+4. Read the **"What the system proved"** box (no overselling, database consistent, no extra bookings from duplicate clicks, worker finished) and the **"What is running right now"** panel (all services healthy, queue/outbox/worker numbers).
+5. Switch to **Raw flood (no retry)**, 20 users x 20 clicks, and run again to show the gateway shedding hundreds of requests with 429 while the data stays consistent.
+6. Optional: sign up on **/signup**, book as that account and open **My bookings** (no e-mail needed).

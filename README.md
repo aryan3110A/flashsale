@@ -26,6 +26,8 @@ A ticket seller announces a popular event. Within seconds thousands of people tr
 - My bookings with auto-refresh while processing.
 - **System monitor** dashboard (real metrics, charts, service health, circuit breaker, "n/a" when a number cannot be measured).
 - **Playground**: rate limiter burst, cache hit/miss, async worker lifecycle with injected failures, circuit breaker scenarios, load-test results.
+- **Live flash-sale simulator** (`/simulator`): N virtual users (default 10 users x 10 tickets, 8 impatient clicks each) hit Book at once against a hidden 50-ticket demo event; live charts of accepted / duplicate-click / sold-out / rate-limited / error counts, the booking pipeline (processing, confirmed, failed), remaining stock, a per-user table, an invariant check ("no overselling, DB consistent, no duplicate bookings, worker drained"), and a live panel showing every service (gateway, booking-api, PostgreSQL, Redis, worker, mock) plus queue / outbox / cache / DB-pool numbers.
+- **Accounts**: sign up / log in / log out (`/signup`, `/login`). Passwords are hashed with scrypt, sessions are opaque revocable tokens, login and sign-up have their own stricter rate limit. Logged-in users book as themselves and see "My bookings" without typing an email. Guest booking still works.
 - Docker Compose stack of 7 services; only the web UI and the gateway are published.
 
 ## 4. Technology stack
@@ -111,7 +113,7 @@ docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
 
 | URL | What |
 |---|---|
-| http://localhost:3000 | Web UI (`/dashboard`, `/playground`, `/bookings`) |
+| http://localhost:3000 | Web UI (`/simulator`, `/dashboard`, `/playground`, `/bookings`, `/login`, `/signup`) |
 | http://localhost:8080/health | Gateway health |
 | http://localhost:8080/health/services | Per-service health (gateway, booking-api, postgres, redis, worker, mock-service) |
 | http://localhost:8080/metrics | Prometheus metrics |
@@ -124,7 +126,9 @@ Full reference with examples: [docs/api-documentation.md](docs/api-documentation
 ```
 GET  /api/events[?category&city&q&minPrice&maxPrice&to&sort]   GET /api/events/featured   GET /api/events/:id   GET /api/categories
 POST /api/bookings            (Idempotency-Key required)  → 202 {bookingId, bookingReference, status:"PROCESSING", statusUrl}
-GET  /api/bookings/:id        GET /api/bookings?email=
+GET  /api/bookings/:id        GET /api/bookings?email=      GET /api/bookings/mine   (Bearer token)
+POST /api/auth/signup | /api/auth/login → {user, token, expiresAt}     GET /api/auth/me     POST /api/auth/logout   (Bearer token)
+GET  /api/demo/flash-sale     POST /api/demo/flash-sale/reset {capacity}      (simulator; ENABLE_DEMO_ENDPOINTS)
 GET  /health  /health/services  /metrics  /metrics/summary  /gateway/circuit-breaker
 GET  /mock/normal | /mock/slow | /mock/fail | /mock/flaky | /mock/service     POST /mock/control
 ```
@@ -189,7 +193,7 @@ Reports are written to `load-tests/results/` and shown in the Playground. Measur
 
 ## 22. Security notes
 
-Env-based secrets, request body limits, CORS allow-list, Helmet headers, parameterised SQL, strict Zod validation, rate limiting, internal network isolation, no secrets in logs (pino redaction). **Known limitation:** there is no user authentication; "My bookings" looks bookings up by e-mail (masked in responses). See the audit for the full list.
+Env-based secrets, request body limits, CORS allow-list, Helmet headers, parameterised SQL, strict Zod validation, rate limiting, internal network isolation, no secrets in logs (pino redaction). Accounts use scrypt password hashes, SHA-256-hashed opaque session tokens (7 days, revocable), generic login errors (no account enumeration) and a stricter login/sign-up rate limit. **Known limitations:** e-mails are not verified (whoever signs up first with a guest e-mail claims that e-mail's booking history); the session token is kept in the browser's `localStorage` (readable by any script on the page, unlike an httpOnly cookie); guests can still look bookings up by e-mail (masked); no password reset, no roles/admin. See the audit for the full list.
 
 ## 23. Team contribution
 

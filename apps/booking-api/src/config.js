@@ -25,6 +25,7 @@ export function loadConfig() {
       backoffMs: num('JOB_BACKOFF_MS', 1000),
     },
     booking: { maxQuantity: num('MAX_TICKETS_PER_BOOKING', 10) },
+    auth: { sessionTtlHours: num('AUTH_SESSION_TTL_HOURS', 168) },
     migrationsDir: str('MIGRATIONS_DIR', fileURLToPath(new URL('../../../database/migrations', import.meta.url))),
     runMigrationsOnStart: bool('RUN_MIGRATIONS_ON_START', true),
     seedOnStart: bool('SEED_ON_START', true),

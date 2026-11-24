@@ -4,7 +4,8 @@ import { requestIdMiddleware, AppError, errorBody, KEYS } from '@flashsale/commo
 import { createEventService } from './services/events.js';
 import { createBookingService } from './services/bookings.js';
 import { jobIdFor } from './services/queue.js';
-import { bookingSchema, eventQuerySchema, emailQuerySchema, IDEMPOTENCY_KEY_RE } from './validation.js';
+import { bookingSchema, eventQuerySchema, emailQuerySchema, signupSchema, loginSchema, resetSchema, IDEMPOTENCY_KEY_RE } from './validation.js';
+import { createAuthService, extractToken } from './services/auth.js';
 import { withTransaction } from './db/pool.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -34,6 +35,26 @@ export function createApp({ cfg, pool, redis, queue, cache, dispatcher, metrics,
   const events = createEventService({ pool, cache, cfg });
   const bookings = createBookingService({ pool, cache, metrics, cfg, dispatcher, logger });
   const schema = bookingSchema(cfg.booking.maxQuantity);
+  const auth = createAuthService({ pool, cfg, logger });
+
+  // Authentication is OPTIONAL for booking (guests can still book) but, when a token is presented,
+  // it must be valid: a bad token is a 401, never silently treated as a guest.
+  const optionalAuth = async (req, _res, next) => {
+    try {
+      const header = req.get('Authorization');
+      if (!header) return next();
+      const token = extractToken(header);
+      const user = token ? await auth.authenticate(token) : null;
+      if (!user) throw new AppError(401, 'INVALID_TOKEN', 'Your session has expired. Please log in again.');
+      req.user = user; req.token = token;
+      next();
+    } catch (err) { next(err); }
+  };
+  const requireAuth = (req, res, next) => optionalAuth(req, res, (e) => {
+    if (e) return next(e);
+    return req.user ? next() : next(new AppError(401, 'AUTH_REQUIRED', 'Please log in.'));
+  });
+  const noStore = (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); };
 
   const setCacheHeaders = (res, r) => res.set('X-Cache', r.source === 'cache' ? 'HIT' : 'MISS');
 
@@ -100,11 +121,33 @@ export function createApp({ cfg, pool, redis, queue, cache, dispatcher, metrics,
     res.json({ success: true, data: r.categories });
   });
 
-  app.post('/api/bookings', async (req, res) => {
+  // ---- accounts -----------------------------------------------------------------------------
+  app.post('/api/auth/signup', noStore, async (req, res) => {
+    const parsed = signupSchema.safeParse(req.body);
+    if (!parsed.success) throw new AppError(400, 'VALIDATION_ERROR', 'Sign-up details are invalid.', parsed.error.flatten().fieldErrors);
+    res.status(201).json({ success: true, data: await auth.signup(parsed.data, req.id) });
+  });
+
+  app.post('/api/auth/login', noStore, async (req, res) => {
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) throw new AppError(400, 'VALIDATION_ERROR', 'Enter your email and password.', parsed.error.flatten().fieldErrors);
+    res.json({ success: true, data: await auth.login(parsed.data, req.id) });
+  });
+
+  app.get('/api/auth/me', noStore, requireAuth, (req, res) => res.json({ success: true, data: { user: req.user } }));
+
+  app.post('/api/auth/logout', noStore, async (req, res) => {
+    await auth.logout(extractToken(req.get('Authorization')));
+    res.json({ success: true, data: { loggedOut: true } });
+  });
+
+  app.post('/api/bookings', optionalAuth, async (req, res) => {
     const key = req.get('Idempotency-Key');
     if (!key) throw new AppError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'An Idempotency-Key header is required for bookings.');
     if (!IDEMPOTENCY_KEY_RE.test(key)) throw new AppError(400, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must be 8-128 characters of letters, digits, . _ : -');
-    const parsed = schema.safeParse(req.body);
+    // A logged-in user always books as themselves: name/email come from the account, not the body.
+    const body = req.user && req.body && typeof req.body === 'object' ? { ...req.body, name: req.user.name, email: req.user.email } : req.body;
+    const parsed = schema.safeParse(body);
     if (!parsed.success) throw new AppError(400, 'VALIDATION_ERROR', 'Booking request is invalid.', parsed.error.flatten().fieldErrors);
 
     const sim = req.get('X-Simulate-Failure');
@@ -118,6 +161,11 @@ export function createApp({ cfg, pool, redis, queue, cache, dispatcher, metrics,
       idempotentReplay: replayed,
       data: { bookingId: booking.id, bookingReference: booking.reference, status: booking.status, quantity: booking.quantity, totalAmount: booking.totalAmount, eventId: booking.eventId, statusUrl },
     });
+  });
+
+  // Must be registered before /api/bookings/:id (otherwise "mine" would be treated as an id).
+  app.get('/api/bookings/mine', noStore, requireAuth, async (req, res) => {
+    res.json({ success: true, data: await bookings.listByEmail(req.user.email) });
   });
 
   app.get('/api/bookings/:id', async (req, res) => {
@@ -152,6 +200,54 @@ export function createApp({ cfg, pool, redis, queue, cache, dispatcher, metrics,
       const { rows } = await pool.query("SELECT id, available_capacity FROM events WHERE slug = 'demo-playground-event'");
       if (!rows[0]) throw new AppError(404, 'EVENT_NOT_FOUND', 'Demo event is not seeded.');
       res.json({ success: true, data: { eventId: rows[0].id, availableCapacity: rows[0].available_capacity, chaosEnabled: cfg.enableChaos } });
+    });
+
+    // ---- live flash-sale simulator (hidden 'flash-sale-demo' event only) ----
+    const FLASH_SLUG = 'flash-sale-demo';
+    const flashState = async (db = pool) => {
+      const { rows } = await db.query(
+        `SELECT e.id, e.title, e.total_capacity, e.available_capacity, e.status,
+                COALESCE(SUM(b.quantity) FILTER (WHERE b.status IN ('PROCESSING','CONFIRMED')), 0)::int AS reserved,
+                COUNT(b.id)::int AS bookings,
+                COUNT(b.id) FILTER (WHERE b.status = 'CONFIRMED')::int AS confirmed,
+                COUNT(b.id) FILTER (WHERE b.status = 'PROCESSING')::int AS processing,
+                COUNT(b.id) FILTER (WHERE b.status = 'FAILED')::int AS failed
+           FROM events e LEFT JOIN bookings b ON b.event_id = e.id
+          WHERE e.slug = $1 GROUP BY e.id`, [FLASH_SLUG]);
+      const r = rows[0];
+      if (!r) throw new AppError(404, 'EVENT_NOT_FOUND', 'Flash-sale demo event is not seeded.');
+      const list = await db.query(
+        `SELECT b.booking_reference AS reference, b.status, b.quantity, b.failure_reason AS "failureReason",
+                u.name AS "customerName", b.created_at AS "createdAt"
+           FROM bookings b JOIN users u ON u.id = b.user_id
+          WHERE b.event_id = $1 ORDER BY b.created_at LIMIT 300`, [r.id]);
+      return {
+        eventId: r.id, title: r.title, totalCapacity: r.total_capacity, availableCapacity: r.available_capacity, status: r.status,
+        bookings: r.bookings, confirmed: r.confirmed, processing: r.processing, failed: r.failed, reservedTickets: r.reserved,
+        // total - available must equal the tickets held by live bookings, and stock can never be negative
+        consistent: r.total_capacity - r.available_capacity === r.reserved && r.available_capacity >= 0,
+        list: list.rows.map((x) => ({ ...x, createdAt: new Date(x.createdAt).toISOString() })),
+      };
+    };
+    app.get('/api/demo/flash-sale', noStore, async (_req, res) => res.json({ success: true, data: await flashState() }));
+
+    // Resets ONLY the hidden demo event: removes its own bookings/outbox rows and restores stock.
+    app.post('/api/demo/flash-sale/reset', noStore, async (req, res) => {
+      const parsed = resetSchema.safeParse(req.body ?? {});
+      if (!parsed.success) throw new AppError(400, 'VALIDATION_ERROR', 'capacity must be a whole number between 1 and 1000.');
+      const capacity = parsed.data.capacity ?? 50;
+      const state = await withTransaction(pool, async (db) => {
+        const { rows } = await db.query('SELECT id FROM events WHERE slug = $1 FOR UPDATE', [FLASH_SLUG]);
+        if (!rows[0]) throw new AppError(404, 'EVENT_NOT_FOUND', 'Flash-sale demo event is not seeded.');
+        const id = rows[0].id;
+        await db.query('DELETE FROM outbox_events WHERE aggregate_id IN (SELECT id FROM bookings WHERE event_id = $1)', [id]);
+        await db.query('DELETE FROM bookings WHERE event_id = $1', [id]);
+        await db.query("UPDATE events SET total_capacity = $2, available_capacity = $2, status = 'ON_SALE', event_date = now() + interval '30 days', updated_at = now() WHERE id = $1", [id, capacity]);
+        return flashState(db);
+      }, metrics);
+      await cache.invalidate([KEYS.event(state.eventId)]);
+      logger.warn({ requestId: req.id, capacity }, 'flash-sale demo event reset');
+      res.json({ success: true, data: state });
     });
 
     app.get('/api/worker/events', async (req, res) => {

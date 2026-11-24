@@ -162,3 +162,42 @@ describe('TimeSeries (bounded metrics memory)', () => {
     expect(ts.toArray()[0]).toMatchObject({ requests: 6, success: 2, clientErrors: 1, rateLimited: 1, failed: 2, avgMs: 10 });
   });
 });
+
+describe('credentials and auth rate limiting (fake upstream)', () => {
+  let ctx; let calls;
+  beforeAll(async () => {
+    calls = [];
+    const upstream = vi.fn(async (url, init) => {
+      calls.push({ path: new URL(url).pathname, headers: init.headers });
+      return new Response('{"success":true}', { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    // login/sign-up bucket is empty; every other bucket has tokens
+    const bucket = async (key) => (String(key).includes(':rl:auth:') ? [0, 0, 2000, 20000] : [1, 39, 0, 0]);
+    ctx = await boot({ upstream, bucket });
+  });
+  afterAll(() => ctx.server.close());
+
+  it('forwards Authorization to booking-api but never to other upstreams', async () => {
+    calls.length = 0;
+    await fetch(`${ctx.base}/api/auth/me`, { headers: { authorization: 'Bearer abc' } });
+    await fetch(`${ctx.base}/mock/normal`, { headers: { authorization: 'Bearer abc' } });
+    expect(calls.find((c) => c.path === '/api/auth/me').headers.authorization).toBe('Bearer abc');
+    expect(calls.find((c) => c.path === '/mock/normal').headers.authorization).toBeUndefined();
+  });
+
+  it('applies the stricter auth bucket to login and sign-up (429, nothing reaches the API)', async () => {
+    calls.length = 0;
+    for (const path of ['/api/auth/login', '/api/auth/signup']) {
+      const r = await fetch(`${ctx.base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      expect(r.status).toBe(429);
+      expect(r.headers.get('retry-after')).toBe('2');
+      expect((await r.json()).error).toBe('RATE_LIMIT_EXCEEDED');
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it('does not apply the auth bucket to /api/auth/me', async () => {
+    const r = await fetch(`${ctx.base}/api/auth/me`);
+    expect(r.status).toBe(200);
+  });
+});

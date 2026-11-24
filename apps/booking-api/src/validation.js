@@ -27,3 +27,19 @@ export const eventQuerySchema = z.object({
 });
 
 export const emailQuerySchema = z.object({ email: z.string().trim().toLowerCase().email().max(200) });
+
+const password = z.string().min(8, 'password must be at least 8 characters').max(128, 'password must be at most 128 characters')
+  .regex(/[A-Za-z]/, 'password must contain a letter').regex(/[0-9]/, 'password must contain a digit');
+
+export const signupSchema = z.object({
+  name: z.string().trim().min(2, 'name must be at least 2 characters').max(100),
+  email: z.string().trim().toLowerCase().email('email must be valid').max(200),
+  password,
+}).strict();
+
+export const loginSchema = z.object({
+  email: z.string().trim().toLowerCase().email('email must be valid').max(200),
+  password: z.string().min(1, 'password is required').max(128),
+}).strict();
+
+export const resetSchema = z.object({ capacity: z.coerce.number().int().min(1).max(1000).optional() }).strict();

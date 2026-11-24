@@ -40,7 +40,7 @@ export function createApp({ cfg, redis, logger, fetchFn = fetch }) {
   app.use(cors({
     origin: (origin, cb) => cb(null, !origin || cfg.corsOrigins.includes(origin)),
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Idempotency-Key', 'X-Request-Id', 'X-Client-Id', 'X-Admin-Token', 'X-Simulate-Failure'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Request-Id', 'X-Client-Id', 'X-Admin-Token', 'X-Simulate-Failure'],
     exposedHeaders: EXPOSED_HEADERS,
     maxAge: 600,
   }));
@@ -71,6 +71,7 @@ export function createApp({ cfg, redis, logger, fetchFn = fetch }) {
   const limiterOpts = { limiter, config: cfg.rateLimit, keyFor, failOpen: cfg.rateLimit.failOpen, metrics, logger, errorBody };
   const apiLimiter = rateLimitMiddleware({ ...limiterOpts, klass: 'api' });
   const monitoringLimiter = rateLimitMiddleware({ ...limiterOpts, klass: 'monitoring' });
+  const authLimiter = rateLimitMiddleware({ ...limiterOpts, klass: 'auth' });
 
   // ---- gateway's own endpoints --------------------------------------------------------------
   app.get('/health/live', monitoringLimiter, (_req, res) => res.json({ status: 'healthy', service: 'gateway', timestamp: new Date().toISOString() }));
@@ -97,11 +98,13 @@ export function createApp({ cfg, redis, logger, fetchFn = fetch }) {
   // ---- proxied routes -----------------------------------------------------------------------
   const rawBody = express.raw({ type: () => true, limit: cfg.bodyLimit });
   const apiProxy = createProxy({
-    upstream: 'booking-api', baseUrl: cfg.apiUrl, timeoutMs: cfg.upstream.apiTimeoutMs, retry: cfg.retry, metrics, logger, errorBody, fetchFn,
+    upstream: 'booking-api', baseUrl: cfg.apiUrl, timeoutMs: cfg.upstream.apiTimeoutMs, retry: cfg.retry, metrics, logger, errorBody, fetchFn, forwardAuthorization: true,
   });
   const mockProxy = createProxy({
     upstream: 'mock-service', baseUrl: cfg.mockUrl, timeoutMs: cfg.upstream.mockTimeoutMs, retry: cfg.retry, breaker, metrics, logger, errorBody, fetchFn,
   });
+  // Stricter bucket for credential endpoints; the request then also counts against the general API bucket.
+  app.post(['/api/auth/login', '/api/auth/signup'], authLimiter);
   app.use('/api', apiLimiter, rawBody, apiProxy);
   app.use('/mock', apiLimiter, rawBody, mockProxy);
 

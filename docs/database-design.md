@@ -9,6 +9,14 @@ PostgreSQL 16. Schema lives in [database/migrations/001_initial_schema.sql](../d
 - A PostgreSQL advisory lock serialises concurrent migrators (e.g. two scaled `booking-api` replicas).
 - Runs automatically on `booking-api` start (`RUN_MIGRATIONS_ON_START`), or manually: `npm run migrate` (add `-- --seed` to seed). Seeds are idempotent (`ON CONFLICT (slug) DO NOTHING`), so restarts never reset inventory.
 
+## Migration 002 - accounts
+
+`002_auth.sql` adds `users.password_hash` (NULL = guest row from an earlier booking) and `users.last_login_at`, and a `sessions` table (`id`, `user_id` -> users ON DELETE CASCADE, `token_hash` UNIQUE, `created_at`, `expires_at`; indexed on user and expiry). It is additive: existing users, bookings and events are untouched.
+
+- **Passwords**: `scrypt$N$r$p$salt$hash` (node:crypto scrypt, N=16384, r=8, p=1, 16-byte random salt per password, 64-byte key). Compared with `timingSafeEqual`.
+- **Sessions**: a random 32-byte token (base64url) is given to the client; only its **SHA-256** is stored, so a database leak does not yield usable sessions. TTL `AUTH_SESSION_TTL_HOURS` (default 168). Logging out deletes the row (immediate revocation). At most 10 live sessions per user; expired rows are purged on login.
+- **Sign-up** is one atomic statement: `INSERT ... ON CONFLICT (email) DO UPDATE SET password_hash = ... WHERE users.password_hash IS NULL`. The conflict branch only fires for guest rows, so an existing account can never be overwritten, and two concurrent sign-ups for one new e-mail cannot both succeed.
+
 ## Tables
 
 ```mermaid

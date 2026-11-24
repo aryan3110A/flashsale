@@ -1,0 +1,11 @@
+node_modules
+.next
+dist
+coverage
+.env
+.DS_Store
+*.log
+test-results/
+playwright-report/
+load-tests/results/*.json
+!load-tests/results/.gitkeep

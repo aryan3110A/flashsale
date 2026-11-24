@@ -1,0 +1,38 @@
+{
+  "name": "flashsale",
+  "private": true,
+  "version": "2.0.0",
+  "description": "FlashSale - distributed event booking and ticketing system (System Design assignment)",
+  "workspaces": [
+    "packages/common",
+    "apps/gateway",
+    "apps/booking-api",
+    "apps/worker",
+    "apps/mock-service",
+    "apps/web"
+  ],
+  "scripts": {
+    "test:unit": "vitest run --config vitest.unit.config.mjs",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "test:fault": "vitest run --config vitest.fault.config.mjs",
+    "test:e2e": "playwright test",
+    "test": "npm run test:unit",
+    "lint": "npm run lint --workspace @flashsale/web",
+    "typecheck": "npm run typecheck --workspace @flashsale/web",
+    "migrate": "node apps/booking-api/src/db/migrate-cli.js",
+    "stack:up": "docker compose up --build -d",
+    "stack:test-up": "docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d",
+    "stack:down": "docker compose down",
+    "load:smoke": "node scripts/run-k6.mjs smoke-test.js",
+    "load:spike": "node scripts/run-k6.mjs spike-test.js",
+    "load:sustained": "node scripts/run-k6.mjs sustained-load-test.js",
+    "load:booking": "node scripts/run-k6.mjs concurrent-booking-test.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

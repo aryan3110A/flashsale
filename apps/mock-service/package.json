@@ -1,0 +1,12 @@
+{
+  "name": "@flashsale/mock-service",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node src/server.js" },
+  "dependencies": {
+    "@flashsale/common": "*",
+    "express": "^5.1.0",
+    "pino": "^9.7.0"
+  }
+}

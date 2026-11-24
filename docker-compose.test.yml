@@ -1,0 +1,30 @@
+# Test overlay:  docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
+# Publishes internal services on 127.0.0.1 ONLY so the host-side test runner can reach them, enables the
+# test admin endpoints, lets tests pick their own rate-limit bucket, and shortens the circuit reset.
+# Never use this overlay for anything but local testing.
+x-test-admin: &test-admin
+  ENABLE_TEST_ENDPOINTS: "true"
+  ADMIN_TOKEN: test-admin-token-local-only
+
+services:
+  postgres:
+    ports: ["127.0.0.1:15432:5432"]
+  redis:
+    ports: ["127.0.0.1:16379:6379"]
+  booking-api:
+    ports: ["127.0.0.1:18081:8081"]
+    environment:
+      <<: *test-admin
+  mock-service:
+    ports: ["127.0.0.1:18082:8082"]
+  worker:
+    ports: ["127.0.0.1:19100:9100"]
+  gateway:
+    environment:
+      RATE_LIMIT_TRUST_CLIENT_ID: "true"
+      CIRCUIT_RESET_TIMEOUT_MS: "3000"
+      <<: *test-admin
+
+networks:
+  backend:
+    internal: false
